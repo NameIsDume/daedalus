@@ -30,24 +30,51 @@ system_prompt = (
 class AgentInput(BaseModel):
     prompt: str
 
-# 📡 Endpoint POST
-@app.post("/run")
-async def run_agent(data: AgentInput):
-    prompt = data.prompt
+@app.post("/api/chat")
+async def run_agent_ollama_format(request: Request):
+    payload = await request.json()
+    messages = payload.get("messages", [])
+    model_name = payload.get("model", "unknown")
+    stream = payload.get("stream", False)
+
+    print(f"Received prompt: {messages}")
+    print(f"Model: {model_name}, Stream: {stream}")
+
+    # Formate les messages pour langgraph
+    formatted_messages = []
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content", "")
+        if role == "system":
+            formatted_messages.append(SystemMessage(content=content))
+        elif role == "user":
+            formatted_messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            formatted_messages.append(AIMessage(content=content))
+
     config = {"configurable": {"thread_id": "default"}}
     try:
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=prompt),
-        ]
         full_response = ""
-        for step in agent.stream({"messages": messages}, config=config, stream_mode="values"):
+        for step in agent.stream({"messages": formatted_messages}, config=config, stream_mode="values"):
             last_msg = step["messages"][-1]
             if isinstance(last_msg, AIMessage):
                 full_response += last_msg.content + "\n"
-        return {"response": full_response.strip()}
+
+        print(f"Response: {full_response.strip()}\n")
+        return {
+            "message": {
+                "role": "assistant",
+                "content": full_response.strip()
+            }
+        }
+
     except ValueError as e:
-        return {"error": str(e)}
+        return {
+            "message": {
+                "role": "assistant",
+                "content": f"Error: {str(e)}"
+            }
+        }
 
 if __name__ == "__main__":
     import uvicorn
