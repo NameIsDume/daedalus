@@ -25,11 +25,9 @@ ROLE_MAP = {
 }
 
 app = FastAPI()
-# File des requêtes entrantes
 task_queue = asyncio.Queue()
 NUM_WORKERS = 2
 
-# Statistiques basiques
 queue_counter = 0
 
 memory = MemorySaver()
@@ -47,15 +45,17 @@ class ChatTask:
         self.payload = payload
         self.response_future = response_future
         self.id = uuid.uuid4().hex
+        self.thread_id = payload.get("thread_id") or self.id
 
 def print_message(msg):
-    msg_type = type(msg).__name__
-    prefix = {
-        "SystemMessage": colored("[SYS]", "cyan"),
-        "HumanMessage": colored("[USER]", "green"),
-        "AIMessage": colored("[AGENT]", "yellow"),
-    }.get(msg_type, "[MSG]")
-    print(f"{prefix} {msg.content.strip()}")
+    pass
+    # msg_type = type(msg).__name__
+    # prefix = {
+    #     "SystemMessage": colored("[SYS]", "cyan"),
+    #     "HumanMessage": colored("[USER]", "green"),
+    #     "AIMessage": colored("[AGENT]", "yellow"),
+    # }.get(msg_type, "[MSG]")
+    # print(f"{prefix} {msg.content.strip()}")
 
 @app.on_event("startup")
 async def start_workers():
@@ -101,6 +101,7 @@ async def agent_worker(worker_id):
 
 async def process_agent_request(payload):
     messages = payload.get("messages", [])
+    thread_id = payload.get("thread_id", "default")
     formatted_messages: list[BaseMessage] = [
         ROLE_MAP[m["role"]](content=m["content"]) for m in messages if m["role"] in ROLE_MAP
     ]
@@ -108,7 +109,7 @@ async def process_agent_request(payload):
     if not any(isinstance(m, SystemMessage) for m in formatted_messages):
         formatted_messages.insert(0, SystemMessage(content=prompt.system_prompt))
 
-    config = {"configurable": {"thread_id": "default"}}
+    config = {"configurable": {"thread_id": thread_id}}
     full_response = ""
 
     for step in agent.stream({"messages": formatted_messages}, config=config, stream_mode="values"):
@@ -119,7 +120,7 @@ async def process_agent_request(payload):
 
             if "act: finish" in msg.content.lower():
                 print("🧼 Fin détectée, reset de l'historique du thread.")
-                memory.delete("default")
+                await memory.adelete_thread(thread_id)
 
     response_text = prompt.remove_multiline_think_blocks(full_response.strip())
     return {
@@ -138,79 +139,3 @@ async def queue_agent_task(request: Request):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("agent:app", host="127.0.0.1", port=11435, reload=True)
-
-# class AgentInput(BaseModel):
-#     prompt: str
-
-# import json
-
-# task_queue = asyncio.Queue()
-# NUM_WORKERS = 2
-
-# # Statistiques basiques
-# queue_counter = 0
-
-# import termcolor
-# from termcolor import colored
-
-# def print_message(msg):
-#     msg_type = type(msg).__name__
-#     prefix = {
-#         "SystemMessage": colored("[SYS]", "cyan"),
-#         "HumanMessage": colored("[USER]", "green"),
-#         "AIMessage": colored("[AGENT]", "yellow"),
-#     }.get(msg_type, "[MSG]")
-#     print(f"{prefix} {msg.content.strip()}")
-
-# @app.post("/api/chat")
-# async def run_agent_ollama_format(request: Request):
-
-#     payload = await request.json()
-#     messages = payload.get("messages", [])
-
-#     formatted_messages: list[BaseMessage] = [
-#         ROLE_MAP[m["role"]](content=m["content"])
-#         for m in messages
-#         if m["role"] in ROLE_MAP
-#     ]
-
-#     if not any(isinstance(m, SystemMessage) for m in formatted_messages):
-#         formatted_messages.insert(0, SystemMessage(content=prompt.system_prompt))
-#     config = {"configurable": {"thread_id": "default"}}
-
-#     try:
-#         full_response = ""
-#         for i, step in enumerate(agent.stream({"messages": formatted_messages}, config=config, stream_mode="values")):
-#             for msg in step["messages"]:
-#                 print_message(msg)
-#             if isinstance(msg, AIMessage):
-#                 full_response += msg.content + "\n"
-
-#         print("#### Final Response ####")
-#         response_text = prompt.remove_multiline_think_blocks(full_response.strip())
-#         print(f"{response_text}\n")
-#         return {
-#             "choices": [
-#                 {
-#                     "message": {
-#                         "role": "assistant",
-#                         "content": response_text
-#                     }
-#                 }
-#             ]
-#         }
-#     except ValueError as e:
-#         return {
-#             "choices": [
-#                 {
-#                     "message": {
-#                     "role": "assistant",
-#                     "content": f"Error: {str(e)}"
-#                     }
-#                 }
-#             ]
-#         }
-
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run("agent:app", host="127.0.0.1", port=11435, reload=True)
