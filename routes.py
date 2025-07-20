@@ -52,6 +52,15 @@ async def debug_memory(thread_id: str = "default") -> JSONResponse:
 
     return JSONResponse(content={thread_id: content_list})
 
+@app.get("/docs")
+def get_doc(command: str):
+    try:
+        result = subprocess.run(["man", command], capture_output=True, text=True)
+        doc = result.stdout or "No manual entry found"
+        return {"command": command, "doc": doc[:2000]}  # Tronqué pour éviter overload
+    except Exception as e:
+        return {"error": str(e)}
+
 async def agent_worker(worker_id) -> None:
     while True:
         task = await task_queue.get()
