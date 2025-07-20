@@ -14,6 +14,14 @@ system_prompt = (
 
 def remove_multiline_think_blocks(text: str) -> str:
     # Supprime tout ce qui est entre <think>...</think>, même sur plusieurs lignes
-    print("############")
+    # print("############")
     cleaned = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL | re.IGNORECASE)
     return cleaned.strip()
+
+# from tools import tools_list
+
+# def my_pre_model_hook(state):
+#     last_msg = state["messages"][-1].content.lower()
+#     if "paris" in last_msg:
+#         raise ValueError("Query blocked: forbidden keyword 'paris'")
+#     return state
