@@ -1,72 +1,28 @@
-import asyncio
-import uuid
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-from agent_manager import handle_request, get_memory, cleanup_inactive_threads
-NUM_WORKERS = 2
+from fastapi import APIRouter
+from pydantic import BaseModel
+from langchain_core.messages import HumanMessage
 
-task_queue = asyncio.Queue()
-active_threads = set()
-queue_counter = 0
+router = APIRouter()
 
-class ChatTask:
-    def __init__(self, payload, response_future):
-        self.payload = payload
-        self.response_future = response_future
-        self.id = uuid.uuid4().hex
-        self.thread_id = payload.get("thread_id") or self.id
+class ChatInput(BaseModel):
+    prompt: str
+    thread_id: str | None = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print(f"🔧 Launching {NUM_WORKERS} workers...")
-    for i in range(NUM_WORKERS):
-        asyncio.create_task(agent_worker(i))
-    asyncio.create_task(cleanup_inactive_threads(ttl=10))  # TTL = 10 min
-    yield
-    print("🛑 Shutting down workers...")
+# ✅ On définit un placeholder pour l'agent
+app_graph = None
 
-app = FastAPI(lifespan=lifespan)
+@router.post("/api/chat")
+async def chat_endpoint(input: ChatInput):
+    if app_graph is None:
+        return {"error": "Agent not initialized"}
+    thread_id = input.thread_id or "default"
+    result = app_graph.invoke(
+        {"messages": [HumanMessage(content=input.prompt)]},
+        config={"thread_id": thread_id}
+    )
+    return {
+        "choices": [
+            {"message": {"role": "assistant", "content": result["messages"][-1].content}}
+        ]
+    }
 
-@app.post("/api/chat")
-async def queue_agent_task(request: Request) -> dict:
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        return JSONResponse(content={"error": "Invalid payload"}, status_code=400)
-    response_future = asyncio.Future()
-    await task_queue.put(ChatTask(payload, response_future))
-    return await response_future
-
-@app.get("/api/status")
-async def status() -> dict:
-    return {"pending": task_queue.qsize()}
-
-@app.get("/api/debug_memory")
-async def debug_memory(thread_id: str = "default") -> JSONResponse:
-    state = get_memory(thread_id)
-    if not state:
-        return JSONResponse(content={thread_id: "🕳️ Empty state"})
-
-    messages = state["channel_values"]["messages"]
-    content_list = [{"role": msg.__class__.__name__.replace("Message", "").lower(), "content": msg.content} for msg in messages]
-
-    return JSONResponse(content={thread_id: content_list})
-
-@app.get("/docs")
-def get_doc(command: str):
-    try:
-        result = subprocess.run(["man", command], capture_output=True, text=True)
-        doc = result.stdout or "No manual entry found"
-        return {"command": command, "doc": doc[:2000]}  # Tronqué pour éviter overload
-    except Exception as e:
-        return {"error": str(e)}
-
-async def agent_worker(worker_id) -> None:
-    while True:
-        task = await task_queue.get()
-        try:
-            result = await handle_request(task.thread_id, task.payload)
-            task.response_future.set_result(result)
-        except Exception as e:
-            task.response_future.set_result({"error": str(e)})
-        task_queue.task_done()
