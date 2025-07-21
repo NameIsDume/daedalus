@@ -54,25 +54,38 @@ def search_in_doc(command: str, keyword: str) -> str:
 def linux_doc_node(state: AgentState) -> AgentState:
     command = state["plan"].input["command"]
     print(colored(f"[TOOL CALL] linux_doc with command='{command}'", "cyan"))
-    
-    result = linux_doc(command)  # ton implémentation
+
+    # ✅ Exécution du tool
+    result = linux_doc(command)
     print(colored(f"[TOOL RESULT] linux_doc returned {len(result)} chars", "cyan"))
-    
-    return {
+
+    # ✅ Construction du nouvel état sans perte d’infos
+    new_state = {
+        **state,
         "messages": state["messages"] + [HumanMessage(content=f"[linux_doc RESULT]\n{result}")],
         "tool_history": state.get("tool_history", []) + ["linux_doc"],
         "cycles": state.get("cycles", 0) + 1
     }
 
+    print(colored(f"[STATE AFTER linux_doc_node] Keys: {list(new_state.keys())}", "red"))
+    return new_state
+
 def search_in_doc_node(state: AgentState) -> AgentState:
     cmd = state["plan"].input["command"]
     kw = state["plan"].input["keyword"]
     print(colored(f"[TOOL CALL] search_in_doc {cmd}:{kw}", "cyan"))
-    
+
+    # ✅ Exécution du tool
     result = search_in_doc(cmd, kw)
-    
-    return {
+
+    # ✅ Merge state
+    new_state = {
+        **state,
         "messages": state["messages"] + [HumanMessage(content=f"[search_in_doc RESULT]\n{result}")],
         "tool_history": state.get("tool_history", []) + ["search_in_doc"],
         "cycles": state.get("cycles", 0) + 1
     }
+
+    print(colored(f"[STATE AFTER search_in_doc_node] Keys: {list(new_state.keys())}", "cyan"))
+    return new_state
+

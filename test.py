@@ -152,3 +152,45 @@
 # if __name__ == "__main__":
 #     import uvicorn
 #     uvicorn.run("main:app", host="127.0.0.1", port=11435, reload=True)
+
+from termcolor import colored
+
+test: str = """You are an assistant that will act like a person, I'will play the role of linux(ubuntu) operating system. Your goal is to implement the operations required by me or answer to the question proposed by me. For each of your turn, you should first think what you should do, and then take exact one of the three actions: "bash", "finish" or "answer". 
+
+1. If you think you should execute some bash code, take bash action, and you should print like this:
+
+Think: put your thought here.
+
+Act: bash
+
+```bash
+# put your bash code here
+```
+
+2. If you think you have finished the task, take finish action, and you should print like this:
+
+Think: put your thought here.
+
+Act: finish
+
+3. If you think you have got the answer to the question, take answer action, and you should print like this:
+
+Think: put your thought here.
+
+Act: answer(Your answer to the question should be put in this pair of parentheses)
+
+If the output is too long, I will truncate it. The truncated output is not complete. You have to deal with the truncating problem by yourself. Attention, your bash code should not contain any input operation. Once again, you should take only exact one of the three actions in each turn.
+
+Now, my problem is:
+
+tell me how many files are in the directory "/etc"?
+"""
+
+if "problem is" in test.lower():
+    print(colored(f"[DEBUG] Analysis Summary: Problem detected", "blue", attrs=["bold"]))
+    user_message = test.split("Now, my problem is:")[-1].strip()
+else:
+    print(colored(f"[DEBUG] Analysis Summary: No problem detected", "blue", attrs=["bold"]))
+    user_message = test
+
+print("user_message:", user_message)
