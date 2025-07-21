@@ -15,6 +15,7 @@ from model import model_llm
 from tools import linux_doc_node, search_in_doc_node
 from routes import router
 
+MAX_CYCLES = 2
 # ==========================================
 # 1. Définir les Schemas Pydantic
 # ==========================================
@@ -26,6 +27,8 @@ class AgentState(TypedDict):
     messages: List[BaseMessage]
     plan: PlanOutput
     tool_history: List[str]
+    draft_solution: str
+    cycles: int
 
 class ChatInput(BaseModel):
     prompt: str
@@ -36,12 +39,6 @@ class ChatInput(BaseModel):
 # ==========================================
 llm = model_llm  # Remplace par ton modèle local (ex: Ollama)
 
-
-# def extract_json(text: str) -> str:
-#     match = re.search(r"\{.*\}", text, re.DOTALL)
-#     if match:
-#         return match.group(0)
-#     raise ValueError("No JSON found in LLM output")
 
 import re
 import json
@@ -58,65 +55,30 @@ def extract_json(text: str) -> str:
     # 3. Si pas trouvé, lever une exception pour fallback
     raise ValueError(f"No valid JSON found in LLM output: {text[:200]}...")
 
-# def extract_json(text: str) -> str:
-#     """
-#     Extrait le dernier JSON valide dans une chaîne contenant du raisonnement
-#     et potentiellement plusieurs blocs JSON. Si aucun JSON valide, renvoie un JSON fallback.
-#     """
-#     # Récupère toutes les occurrences entre accolades
-#     candidates = re.findall(r"\{.*?\}", text, re.DOTALL)
-
-#     # Vérifie chaque occurrence en partant de la fin
-#     for candidate in reversed(candidates):
-#         try:
-#             json.loads(candidate)  # Teste la validité JSON
-#             return candidate
-#         except json.JSONDecodeError:
-#             continue
-
-#     # Fallback si aucun JSON valide trouvé
-#     print("[WARN] Aucun JSON valide trouvé, utilisation du fallback.")
-#     return json.dumps({
-#         "action": "finish",
-#         "input": {"answer": "Could not parse LLM response."}
-#     })
-
-# ==========================================
-# Analyze node
-# ==========================================
-from langchain_core.messages import SystemMessage, HumanMessage
-from termcolor import colored
-
-def formatter_node(state: AgentState) -> AgentState:
+def extract_format_node(state: AgentState) -> AgentState:
     """
-    Formate la réponse finale en respectant le format du benchmark :
-    - Si la réponse contient une commande → bash
-    - Sinon → answer
+    Extrait le format attendu du premier message utilisateur (benchmark instruction).
     """
-    analysis_summary = state.get("analysis", "No analysis available.")
-    final_input = state["plan"].input
-    answer = final_input.get("answer", "").strip()
+    user_instruction = state["messages"][0].content
 
-    # Heuristique : si "ls", "find", "cat", etc. dans la réponse → bash
-    if any(cmd in answer for cmd in ["ls", "find", "cat", "grep", "wc", "chmod"]):
-        formatted = f"""Think: {analysis_summary}
+    prompt = f"""
+You are a strict extractor. The user provided an instruction for how the output should be formatted.
+Extract ONLY the output format from the following text:
+---
+{user_instruction}
+---
+Return ONLY the template of the expected format (no explanations).
+"""
 
-Act: bash
+    response = llm.invoke([SystemMessage(content=prompt)])
+    extracted_format = response.content.strip()
 
-```bash
-{answer}
-```"""
-    else:
-        formatted = f"""Think: {analysis_summary}
+    print(colored(f"[DEBUG] Extracted Expected Format:\n{extracted_format}\n{'-'*50}", "blue"))
 
-Act: answer({answer})"""
-
-    print(colored(f"[FINAL OUTPUT]\n{formatted}\n{'-'*50}", "cyan", attrs=["bold"]))
-    return {"messages": state["messages"] + [HumanMessage(content=formatted)]}
-
-from termcolor import colored
-from langchain_core.messages import HumanMessage
-from typing import Dict
+    return {
+        "messages": state["messages"] + [HumanMessage(content=f"[Expected Format Extracted]\n{extracted_format}")],
+        "expected_format": extracted_format
+    }
 
 def analyze_task(state: Dict) -> Dict:
     """
@@ -146,6 +108,136 @@ Summary: <one concise sentence>
         "messages": state["messages"] + [HumanMessage(content=f"[ANALYSIS]\n{summary_text}")]
     }
 
+def reasoning_draft_node(state: AgentState) -> AgentState:
+    user_request = state["messages"][-1].content
+    analysis_summary = state.get("analysis_summary", "No summary.")
+
+    prompt = f"""
+You are a Linux command generator. The user wants: "{user_request}"
+Analysis Summary: "{analysis_summary}"
+
+Generate the BEST possible bash command to achieve this.
+Follow format:
+Think: (why this command solves it)
+Bash: (the exact command)
+"""
+    response = llm.invoke([SystemMessage(content=prompt)])
+    draft_output = response.content.strip()
+
+    print(colored(f"[DRAFT REASONING]\n{draft_output}\n{'-'*50}", "cyan"))
+    return {
+        "draft_solution": draft_output,
+        "messages": state["messages"] + [HumanMessage(content=f"[DRAFT]\n{draft_output}")]
+    }
+
+def planner_node(state: AgentState) -> AgentState:
+    draft = state.get("draft_solution", "")
+    tool_history = state.get("tool_history", [])
+    analysis_summary = state.get("analysis_summary", "")
+
+    prompt = f"""
+You are the Planner. Decide NEXT action.
+
+User task: "{analysis_summary}"
+Draft solution: {draft}
+
+Tool history: {tool_history if tool_history else "None"}
+
+Rules:
+- If the draft solves the task → finish
+- Else:
+  - If linux_doc not used → linux_doc
+  - Else → search_in_doc
+Return ONLY JSON in one of these formats:
+{{"action": "linux_doc", "input": {{"command": "<command>"}}}}
+{{"action": "search_in_doc", "input": {{"command": "<command>", "keyword": "<keyword>"}}}}
+{{"action": "finish", "input": {{"answer": "<answer>"}}}}
+"""
+
+    response = llm.invoke([SystemMessage(content=prompt)])
+    raw_output = response.content.strip()
+    print(colored(f"[PLANNER RAW]\n{raw_output}\n{'-'*50}", "yellow"))
+
+    try:
+        json_text = extract_json(raw_output)
+        parsed = PlanOutput.model_validate_json(json_text)
+    except Exception as e:
+        print(colored(f"[WARN] Fallback: invalid JSON → finish", "red"))
+        parsed = PlanOutput(action="finish", input={"answer": draft})
+
+    return {
+        "plan": parsed,
+        "messages": state["messages"] + [HumanMessage(content=f"[PLANNER]\n{parsed.model_dump_json()}")]
+    }
+
+
+# ==========================================
+# Analyze node
+# ==========================================
+from langchain_core.messages import SystemMessage, HumanMessage
+from termcolor import colored
+
+def reasoning_final_node(state: AgentState) -> AgentState:
+    analysis_summary = state.get("analysis_summary", "No summary.")
+    draft_solution = state.get("draft_solution", "")
+    tool_context = "\n".join(
+        [m.content for m in state["messages"] if "[linux_doc RESULT]" in m.content or "[search_in_doc RESULT]" in m.content]
+    )
+
+    prompt = f"""
+Refine the previous solution using additional context.
+
+User goal: "{analysis_summary}"
+Previous draft:
+{draft_solution}
+
+Tool context:
+{tool_context if tool_context else "No extra info."}
+
+Generate improved version:
+Think: (reasoning)
+Bash: (final command)
+"""
+    response = llm.invoke([SystemMessage(content=prompt)])
+    final_output = response.content.strip()
+
+    print(colored(f"[FINAL REASONING]\n{final_output}\n{'-'*50}", "magenta"))
+    return {
+        "messages": state["messages"] + [HumanMessage(content=final_output)]
+    }
+
+def formatter_node(state: AgentState) -> AgentState:
+    raw_reasoning = state["messages"][-1].content
+    expected_format = state.get("expected_format", "Think: ...\n\nAct: bash\n\n```bash\n<command>\n```")
+
+    prompt = f"""
+Take the reasoning below and output ONLY in the expected format.
+
+Reasoning:
+---
+{raw_reasoning}
+---
+
+Expected format:
+---
+{expected_format}
+---
+
+DO NOT include any explanations. Output ONLY the formatted response.
+"""
+    response = llm.invoke([SystemMessage(content=prompt)])
+    formatted_output = response.content.strip()
+
+    print(colored(f"[FINAL OUTPUT]\n{formatted_output}\n{'-'*50}", "green"))
+    return {
+        "messages": state["messages"] + [HumanMessage(content=formatted_output)]
+    }
+
+
+from termcolor import colored
+from langchain_core.messages import HumanMessage
+from typing import Dict
+
 #############
 from pydantic import BaseModel
 from typing import Dict, Literal
@@ -158,120 +250,12 @@ class PlanOutput(BaseModel):
     action: Literal["linux_doc", "search_in_doc", "finish"]
     input: Dict[str, str]
 
-def extract_json(text: str) -> str:
-    """Extrait le premier objet JSON valide trouvé dans un texte."""
-    match = re.search(r"\{[\s\S]*\}", text)
-    if match:
-        return match.group(0)
-    raise ValueError("No JSON found")
-
-def planner_node(state: Dict) -> Dict:
-    """
-    Étape 2 : Planner.
-    À partir de l'`analysis_summary`, décide quelle action effectuer et construit un JSON.
-    """
-    analysis_summary = state.get("analysis_summary", "")
-    previous_tools = state.get("tool_history", [])
-
-    prompt = f"""
-You are a Linux command assistant that plans the next step.
-
-Task Summary: "{analysis_summary}"
-
-Available actions:
-- linux_doc(command): Fetch the manual page of a Linux command.
-- search_in_doc(command, keyword): Search a keyword inside the manual page.
-- finish: Provide the final answer.
-
-Rules:
-1. If this is the first step, choose linux_doc with the most relevant command.
-2. Use search_in_doc if you already fetched a manual and need a specific flag/keyword.
-3. Use finish if you have enough information to answer.
-4. Do NOT repeat the same tool twice.
-5. Output only JSON, no text outside JSON.
-
-Examples:
-{{"action": "linux_doc", "input": {{"command": "ls"}}}}
-{{"action": "search_in_doc", "input": {{"command": "ls", "keyword": "hidden"}}}}
-{{"action": "finish", "input": {{"answer": "Use ls -a to display hidden files."}}}}
-
-Now decide:
-"""
-
-    # ✅ Génération via LLM
-    response = llm.invoke([
-        SystemMessage(content=prompt),
-        HumanMessage(content=f"Previous tools used: {previous_tools}")
-    ])
-
-    raw_output = response.content.strip()
-    print(colored(f"[DEBUG] Raw Planner Response:\n{raw_output}", "yellow", attrs=["bold"]))
-
-    # ✅ Extraction JSON avec fallback
-    try:
-        json_text = extract_json(raw_output)
-        parsed = PlanOutput.model_validate_json(json_text)
-    except Exception as e:
-        print(colored(f"[WARN] Invalid JSON → fallback mode: {e}", "red"))
-        parsed = PlanOutput(action="finish", input={"answer": "Could not parse LLM response."})
-
-    print(colored(f"[PLANNER DECISION] {parsed.action} → input: {parsed.input}", "green", attrs=["bold"]))
-
-    return {
-        "plan": parsed,
-        "messages": state["messages"] + [HumanMessage(content=f"[PLANNER OUTPUT]\n{parsed.model_dump_json()}")]
-    }
-
-
-# ==========================================
-# 4. LLM Planner Node
-# ==========================================
-def llm_planner(state: Dict) -> Dict:
-    """Planifie le prochain outil ou termine."""
-    messages = state["messages"]
-    prompt = """
-You are an autonomous Linux assistant. You have two tools:
-- linux_doc(command): Fetch the manual page of a Linux command.
-- search_in_doc(command, keyword): Search for a specific keyword inside the manual page of a command.
-
-Important Rules:
-- First, check if the user question is related to Linux commands or terminal usage.
-- If the question is NOT about Linux or shell commands, answer immediately and do NOT call any tool.
-- If the question IS about Linux commands:
-    1. You MUST call linux_doc first for the most relevant command.
-    2. After calling linux_doc, if needed, use search_in_doc ONLY if the question asks about a specific option or flag, or if you need to locate a specific keyword in the manual.
-    3. NEVER invent keywords that do not appear in the user question.
-    4. If the answer is clear after linux_doc, skip search_in_doc and go to finish.
-- NEVER return finish as your first action in a Linux-related question.
-
-Output ONLY JSON, with no additional text:
-{"action": "linux_doc"|"search_in_doc"|"finish", "input": {...}}
-After reasoning, OUTPUT ONLY a single valid JSON object on a new line.
-Do NOT include anything else after the JSON.
-
-Examples:
-{"action": "linux_doc", "input": {"command": "ls"}}
-{"action": "search_in_doc", "input": {"command": "ls", "keyword": "hidden"}}
-{"action": "finish", "input": {"answer": "Use ls -a to display hidden files."}}
-"""
-    response = llm.invoke([SystemMessage(content=prompt)] + messages)
-
-    # ✅ Extraire uniquement le JSON
-    json_text = extract_json(response.content)
-    parsed = PlanOutput.model_validate_json(json_text)
-    print(colored("\n[DEBUG] Raw LLM Response:\n", "yellow", attrs=["bold"]))
-    print(response.content)
-    print(colored("\n[DEBUG] End of Raw Response\n", "yellow", attrs=["bold"]))
-    print(colored(f"[PLANNER DECISION] {parsed.action} → input: {parsed.input}", "green", attrs=["bold"]))
-    return {"plan": parsed}
-
-# ==========================================
-# 5. Node Final Answer
-# ==========================================
-def final_answer(state: Dict) -> Dict:
-    """Construit la réponse finale."""
-    answer = state["plan"].input.get("answer", "No final answer provided.")
-    return {"messages": [HumanMessage(content=f"Final Answer: {answer}")]}
+# def extract_json(text: str) -> str:
+#     """Extrait le premier objet JSON valide trouvé dans un texte."""
+#     match = re.search(r"\{[\s\S]*\}", text)
+#     if match:
+#         return match.group(0)
+#     raise ValueError("No JSON found")
 
 # ==========================================
 # 6. Construire le Graph LangGraph
@@ -279,48 +263,55 @@ def final_answer(state: Dict) -> Dict:
 graph = StateGraph(AgentState)
 
 def route_from_plan(state: AgentState) -> str:
-    """
-    Détermine le prochain nœud en fonction du plan.
-    Ajoute une logique anti-boucle basée sur l'historique des outils.
-    """
     action = state["plan"].action
+    cycles = state.get("cycles", 0)
     history = state.get("tool_history", [])
 
-    # Si l'action prévue est déjà exécutée → on passe directement à formatter
-    if action in history:
-        print(colored(f"[WARN] Action '{action}' déjà exécutée. Passage à formatter.", "red", attrs=["bold"]))
-        return "formatter"
+    # Si déjà trop de cycles → on force reasoning_final
+    if cycles >= MAX_CYCLES:
+        print(colored(f"[WARN] Max cycles reached ({cycles}). Going to reasoning_final.", "red", attrs=["bold"]))
+        return "reasoning_final"
 
-    # Logique normale
+    # Si finish → on saute aux reasoning_final
+    if action == "finish":
+        return "reasoning_final"
+
+    # Sinon, plan normal
     if action == "linux_doc":
         return "linux_doc"
     elif action == "search_in_doc":
         return "search_in_doc"
-    elif action == "finish":
-        return "formatter"
 
-    # Fallback (par sécurité)
-    return "formatter"
+    return "reasoning_final"
 
-graph.add_node("analyzer", analyze_task)
+graph = StateGraph(AgentState)
+
+graph.add_node("extract_format", extract_format_node)
+graph.add_node("analyze", analyze_task)
+graph.add_node("reasoning_draft", reasoning_draft_node)
 graph.add_node("planner", planner_node)
 graph.add_node("linux_doc", linux_doc_node)
 graph.add_node("search_in_doc", search_in_doc_node)
+graph.add_node("reasoning_final", reasoning_final_node)
 graph.add_node("formatter", formatter_node)
 
-# Edges
-graph.add_edge("analyzer", "planner")  # L'analyse mène au planner
+graph.add_edge("extract_format", "analyze")
+graph.add_edge("analyze", "reasoning_draft")
+graph.add_edge("reasoning_draft", "planner")
+
 graph.add_conditional_edges("planner", route_from_plan, {
     "linux_doc": "linux_doc",
     "search_in_doc": "search_in_doc",
-    "formatter": "formatter"
+    "reasoning_final": "reasoning_final"
 })
+
 graph.add_edge("linux_doc", "planner")
 graph.add_edge("search_in_doc", "planner")
+graph.add_edge("reasoning_final", "formatter")
 graph.add_edge("formatter", END)
 
-# Entry point
-graph.set_entry_point("analyzer")
+graph.set_entry_point("extract_format")
+
 
 # Compile avec MemorySaver
 from langgraph.checkpoint.memory import MemorySaver
