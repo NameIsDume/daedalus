@@ -14,6 +14,7 @@ class PlanOutput(BaseModel):
 class AgentState(TypedDict):
     messages: List[BaseMessage]
     plan: PlanOutput
+    tool_history: List[str]
 
 
 # ==========================================
@@ -56,10 +57,20 @@ def linux_doc_node(state: AgentState) -> AgentState:
         result = linux_doc.run(command)
         print(colored(f"[TOOL RESULT] linux_doc returned {len(result)} chars", "cyan"))
 
-        return {"messages": state["messages"] + [HumanMessage(content=f"[linux_doc RESULT]\n{result[:200]}...")]}
+        new_history = state.get("tool_history", []) + ["linux_doc"]
+        print(colored(f"[DEBUG] tool_history updated: {new_history}", "blue"))
+
+        return {
+            "messages": state["messages"] + [HumanMessage(content=f"[linux_doc RESULT]\n{result[:200]}...")],
+            "tool_history": new_history
+        }
+
     except Exception as e:
         print(colored(f"[ERROR] linux_doc failed: {str(e)}", "red", attrs=["bold"]))
-        return {"messages": state["messages"] + [HumanMessage(content=f"[linux_doc ERROR]\n{str(e)}")]}
+        return {
+            "messages": state["messages"] + [HumanMessage(content=f"[linux_doc ERROR]\n{str(e)}")],
+            "tool_history": state.get("tool_history", [])
+        }
 
 def search_in_doc_node(state: AgentState) -> AgentState:
     command = state["plan"].input.get("command")
@@ -71,8 +82,46 @@ def search_in_doc_node(state: AgentState) -> AgentState:
         result = search_in_doc.run({"command": command, "keyword": keyword})
         print(colored(f"[TOOL RESULT] search_in_doc returned {len(result.splitlines())} lines", "cyan"))
 
-        return {"messages": state["messages"] + [HumanMessage(content=f"[search_in_doc RESULT]\n{result[:200]}...")]}
+        new_history = state.get("tool_history", []) + ["search_in_doc"]
+        print(colored(f"[DEBUG] tool_history updated: {new_history}", "blue"))
+
+        return {
+            "messages": state["messages"] + [HumanMessage(content=f"[search_in_doc RESULT]\n{result[:200]}...")],
+            "tool_history": new_history
+        }
 
     except Exception as e:
         print(colored(f"[ERROR] search_in_doc failed: {str(e)}", "red", attrs=["bold"]))
-        return {"messages": state["messages"] + [HumanMessage(content=f"[search_in_doc ERROR]\n{str(e)}")]}
+        return {
+            "messages": state["messages"] + [HumanMessage(content=f"[search_in_doc ERROR]\n{str(e)}")],
+            "tool_history": state.get("tool_history", [])
+        }
+
+# def linux_doc_node(state: AgentState) -> AgentState:
+#     command = state["plan"].input.get("command")
+#     print(colored(f"[TOOL CALL] linux_doc with command='{command}'", "yellow", attrs=["bold"]))
+
+#     try:
+#         result = linux_doc.run(command)
+#         print(colored(f"[TOOL RESULT] linux_doc returned {len(result)} chars", "cyan"))
+#         new_history = state.get("tool_history", []) + ["linux_doc"]
+#         return {"messages": state["messages"] + [HumanMessage(content=f"[linux_doc RESULT]\n{result[:200]}...")]}
+#     except Exception as e:
+#         print(colored(f"[ERROR] linux_doc failed: {str(e)}", "red", attrs=["bold"]))
+#         return {"messages": state["messages"] + [HumanMessage(content=f"[linux_doc ERROR]\n{str(e)}")]}
+
+# def search_in_doc_node(state: AgentState) -> AgentState:
+#     command = state["plan"].input.get("command")
+#     keyword = state["plan"].input.get("keyword")
+
+#     print(colored(f"[TOOL CALL] search_in_doc with command='{command}', keyword='{keyword}'", "yellow", attrs=["bold"]))
+
+#     try:
+#         result = search_in_doc.run({"command": command, "keyword": keyword})
+#         print(colored(f"[TOOL RESULT] search_in_doc returned {len(result.splitlines())} lines", "cyan"))
+
+#         return {"messages": state["messages"] + [HumanMessage(content=f"[search_in_doc RESULT]\n{result[:200]}...")]}
+
+#     except Exception as e:
+#         print(colored(f"[ERROR] search_in_doc failed: {str(e)}", "red", attrs=["bold"]))
+#         return {"messages": state["messages"] + [HumanMessage(content=f"[search_in_doc ERROR]\n{str(e)}")]}
