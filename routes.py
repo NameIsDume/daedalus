@@ -1,7 +1,70 @@
+# from fastapi import APIRouter
+# from pydantic import BaseModel
+# from typing import List
+# from langchain_core.messages import HumanMessage
+
+# class Message(BaseModel):
+#     role: str
+#     content: str
+
+# class ChatInput(BaseModel):
+#     messages: List[Message]
+#     thread_id: str | None = None
+
+# def create_router(app_graph):
+#     router = APIRouter()
+
+#     @router.post("/api/chat")
+#     async def chat_endpoint(input: ChatInput):
+#         # user_message = input.messages[-1].content if input.messages else ""
+#         user_message = "\n".join([msg.content for msg in input.messages])
+#         thread_id = input.thread_id or "default"
+
+#         print(f"Received chat input: {user_message} (thread_id: {thread_id})")
+#         print("#############################################")
+
+#         # ✅ Construire l'état initial avec le message utilisateur
+#         # initial_state = {
+#         #     "messages": [HumanMessage(content=user_message)],
+#         #     "tool_history": [],
+#         #     "draft_solution": "",
+#         #     "cycles": 0,
+#         #     "analysis_summary": "",
+#         #     "expected_format": ""
+#         # }
+#         initial_state = {
+#             "messages": [HumanMessage(content=msg.content) for msg in input.messages],
+#             "tool_history": [],
+#             "draft_solution": "",
+#             "cycles": 0,
+#             "analysis_summary": "",
+#             "expected_format": ""
+#         }
+
+#         # ✅ Appel du graph
+#         result = app_graph.invoke(
+#             initial_state,
+#             config={"configurable": {"thread_id": thread_id}}
+#         )
+
+#         return {
+#             "choices": [
+#                 {"message": {"role": "assistant", "content": result["messages"][-1].content}}
+#             ]
+#         }
+
+
+#     return router
+
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict
 from langchain_core.messages import HumanMessage
+
+# ----------------------
+# ✅ Cache en mémoire
+# ----------------------
+session_cache: Dict[str, Dict] = {}
 
 class Message(BaseModel):
     role: str
@@ -19,30 +82,53 @@ def create_router(app_graph):
         user_message = input.messages[-1].content if input.messages else ""
         thread_id = input.thread_id or "default"
 
-        print(f"Received chat input: {user_message} (thread_id: {thread_id})")
-        print("#############################################")
+        # print(f"Received chat input: {user_message} (thread_id: {thread_id})")
+        # print("#############################################")
 
-        # ✅ Construire l'état initial avec le message utilisateur
+        # ----------------------
+        # ✅ Récupération du contexte existant
+        # ----------------------
+        context = session_cache.get(thread_id, {
+            "expected_format": "",
+            "analysis_summary": "",
+            "tool_history": [],
+            "last_output": ""
+        })
+
+        # ----------------------
+        # ✅ Préparation de l'état initial pour app_graph
+        # ----------------------
         initial_state = {
             "messages": [HumanMessage(content=user_message)],
-            "tool_history": [],
+            "tool_history": context["tool_history"],
             "draft_solution": "",
             "cycles": 0,
-            "analysis_summary": "",
-            "expected_format": ""
+            "analysis_summary": context["analysis_summary"],
+            "expected_format": context["expected_format"],
+            "last_output": context["last_output"]
         }
 
-        # ✅ Appel du graph
+        # ✅ Exécution du graphe
         result = app_graph.invoke(
             initial_state,
             config={"configurable": {"thread_id": thread_id}}
         )
 
+        # ----------------------
+        # ✅ Mise à jour du cache
+        # ----------------------
+        session_cache[thread_id] = {
+            "expected_format": result.get("expected_format", context["expected_format"]),
+            "analysis_summary": result.get("analysis_summary", context["analysis_summary"]),
+            "tool_history": result.get("tool_history", context["tool_history"]),
+            "last_output": user_message  # Dernière sortie reçue du "système"
+        }
+
+        # ✅ Retour au client
         return {
             "choices": [
                 {"message": {"role": "assistant", "content": result["messages"][-1].content}}
             ]
         }
-
 
     return router

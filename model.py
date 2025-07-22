@@ -2,8 +2,9 @@ from langchain.chat_models import init_chat_model
 
 model_llm = init_chat_model(
     # model="qwen3:1.7b",
-    model="qwen2.5-coder:1.5b",
+    # model="qwen2.5-coder:1.5b",
     # model="qwen3:"
+    model="qwen2.5-coder:7b",
     # model="qwen3:0.6b",
     # model="qwen3:1.7b",
     # model="qwen3:4b",

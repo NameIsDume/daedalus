@@ -13,11 +13,11 @@ class PlanOutput(BaseModel):
 
 class AgentState(TypedDict):
     messages: List[BaseMessage]
-    plan: PlanOutput
-    tool_history: List[str]
+    expected_format: str
+    analysis_summary: str
     draft_solution: str
+    tool_context: str
     cycles: int
-
 
 # ==========================================
 # 2. Tools
@@ -51,15 +51,26 @@ def search_in_doc(command: str, keyword: str) -> str:
     print(f"{prefix} has been called")
     return "\n".join(matches[:10])
 
+import re
+from langchain_core.messages import HumanMessage
+from termcolor import colored
+
 def linux_doc_node(state: AgentState) -> AgentState:
-    command = state["plan"].input["command"]
+    # Récupérer le plan
+    plan = state.get("plan", {})
+    plan_input = plan.get("input", "")
+
+    # Essayer d'extraire le "command" depuis la chaîne
+    match = re.search(r'"command"\s*:\s*"([^"]+)"', plan_input)
+    command = match.group(1) if match else "ls"  # fallback par défaut
+
     print(colored(f"[TOOL CALL] linux_doc with command='{command}'", "cyan"))
 
     # ✅ Exécution du tool
     result = linux_doc(command)
     print(colored(f"[TOOL RESULT] linux_doc returned {len(result)} chars", "cyan"))
 
-    # ✅ Construction du nouvel état sans perte d’infos
+    # ✅ Mise à jour de l'état
     new_state = {
         **state,
         "messages": state["messages"] + [HumanMessage(content=f"[linux_doc RESULT]\n{result}")],
@@ -71,14 +82,22 @@ def linux_doc_node(state: AgentState) -> AgentState:
     return new_state
 
 def search_in_doc_node(state: AgentState) -> AgentState:
-    cmd = state["plan"].input["command"]
-    kw = state["plan"].input["keyword"]
+    plan = state.get("plan", {})
+    plan_input = plan.get("input", "")
+
+    # Extraire commande et mot-clé via regex
+    cmd_match = re.search(r'"command"\s*:\s*"([^"]+)"', plan_input)
+    kw_match = re.search(r'"keyword"\s*:\s*"([^"]+)"', plan_input)
+
+    cmd = cmd_match.group(1) if cmd_match else "ls"
+    kw = kw_match.group(1) if kw_match else "--help"
+
     print(colored(f"[TOOL CALL] search_in_doc {cmd}:{kw}", "cyan"))
 
     # ✅ Exécution du tool
     result = search_in_doc(cmd, kw)
 
-    # ✅ Merge state
+    # ✅ Mise à jour de l'état
     new_state = {
         **state,
         "messages": state["messages"] + [HumanMessage(content=f"[search_in_doc RESULT]\n{result}")],
@@ -88,4 +107,3 @@ def search_in_doc_node(state: AgentState) -> AgentState:
 
     print(colored(f"[STATE AFTER search_in_doc_node] Keys: {list(new_state.keys())}", "cyan"))
     return new_state
-
