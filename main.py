@@ -14,6 +14,8 @@ import uvicorn
 from model import model_llm
 from tools import linux_doc_node, search_in_doc_node
 from reasoning import reasoning_draft_node
+from analyse import analyse_problem_node
+
 MAX_CYCLES = 2
 
 llm = model_llm
@@ -44,126 +46,6 @@ Think: Explain why the task is done.
 Act: finish
 """
 
-def analyse_node_first_interaction(state: AgentState) -> AgentState:
-    """
-    Analyse le premier message utilisateur pour définir le but initial.
-    """
-    user_message = state["messages"][-1].content if state.get("messages") else ""
-    # print(colored(f"[DEBUG] First interaction analysis:\n{user_message}\n{'-'*50}", "cyan"))
-
-    if "problem is" in user_message.lower():
-        # Si le message contient "problem is", on en déduit le but initial
-        user_message = user_message.split("problem is", 1)[-1].strip()
-
-    prompt = f"""
-Summarize the user's problem in one short sentence.
-User message:
-{user_message}
-Rules:
-- Do NOT propose a solution.
-- Max 30 words.
-"""
-    response = llm.invoke([SystemMessage(content=prompt)])
-    analysis_summary = response.content.strip()
-    
-    print(colored(f"[DEBUG] Initial Problem Analysis: {analysis_summary}", "red"))
-    return {
-        **state,
-        "analysis_summary": analysis_summary,
-        "current_problem": analysis_summary,
-        "messages": state["messages"] + [HumanMessage(content=f"[Analysis Summary]\n{analysis_summary}")]
-    }
-    
-def analyse_node_previous_summary(state: AgentState) -> AgentState:
-    """
-    We already have a previous summary, so we act differently:
-    """
-    user_message = state["messages"][-1].content if state.get("messages") else ""
-    current_problem = state.get("current_problem", "")
-    previous_summary = state.get("analysis_summary", "")
-    last_action = state.get("last_action", None)
-    print(colored(f"[DEBUG] Previous summary analysis:\n{user_message}\n{'-'*50}", "cyan"))
-
-    prompt = f"""
-You are analyzing the output of an executed command in a multi-step reasoning process.
-The final goal is: "{current_problem}"
-Previous summary: "{previous_summary}"
-Last executed action: "{last_action}"
-System output: "{user_message}"
-Explain in ONE short sentence what this output means in relation to the goal.
-Examples:
-- If it's just a number → It's probably the result (file count).
-- If it's an error → Command failed, needs correction.
-- If unrelated → Output irrelevant to goal.
-Return only the interpretation, no extra text.
-    """
-    response = llm.invoke([SystemMessage(content=prompt)])
-    analysis_summary = response.content.strip()
-    print(colored(f"[DEBUG] Contextual Interpretation: {analysis_summary}", "cyan"))
-    
-    return {
-        **state,
-        "analysis_summary": analysis_summary,
-        "messages": state["messages"] + [HumanMessage(content=f"[Analysis Summary]\n{analysis_summary}")]
-    }
-
-def analyze_problem_node(state: AgentState) -> AgentState:
-    """
-    If there is no previous summary, we analyze the first interaction.
-    If there is a previous summary, we analyze the last user message in context of that summary
-    If there is "start" a new problem" in the last message, we reset the analysis.
-    """
-    previous_summary = state.get("analysis_summary", "")
-
-    if not previous_summary:
-        return analyse_node_first_interaction(state)
-    else:
-        return analyse_node_previous_summary(state)
-
-
-# def reasoning_draft_node(state: AgentState) -> AgentState:
-#     analysis_summary = state.get("analysis_summary", "No summary available.")
-#     # user_message = state["messages"][-1].content if state.get("messages") else ""
-#     current_problem = state.get("current_problem", "")
-#     last_action = state.get("last_action", None)
-
-#     print(colored("[DEBUG] Generating draft reasoning...", "yellow"))
-#     print(colored(f"Analysis Summary: {analysis_summary}", "yellow"))
-#     print(colored(f"Current Problem: {current_problem}", "yellow"))
-#     # print(colored(f"Last User Message: {user_message}", "yellow"))
-
-#     prompt = f"""
-# You are an assistant that will act like a person. You MUST follow a strict multi-step process to complete the task.
-
-# RULES:
-# - You always output in the format:
-# Think: <your reasoning>
-# Act: <one of bash, answer, or finish>
-# - ONE action per step.
-# - bash → execute command.
-# - answer(<value>) → when you have the requested result.
-# - finish → ONLY when user confirms the task is done.
-# - NEVER output explanations or multiple actions.
-# - Use previous steps for reasoning, do not repeat them.
-
-# Current Problem: {current_problem}
-# Current Analysis Summary: {analysis_summary}
-# Last time you :
-# {last_action}
-# """
-# # Current User Message: {user_message}
-
-#     # ✅ Appel LLM
-#     response = llm.invoke([SystemMessage(content=prompt)])
-#     draft_solution = response.content.strip()
-
-#     print(colored(f"[DRAFT REASONING]\n{draft_solution}\n{'-'*50}", "red"))
-
-#     return {
-#         **state,
-#         "draft_solution": draft_solution,
-#         "messages": state["messages"] + [HumanMessage(content=f"[Draft Solution]\n{draft_solution}")]
-#     }
 
 import re
 from langchain_core.messages import SystemMessage
@@ -197,7 +79,7 @@ def planner_node(state: AgentState) -> AgentState:
 
     # ✅ Préparer le prompt pour la décision
     prompt = f"""
-You are the Planner in a reasoning system.
+You are the Orchestrator in a reasoning system.
 Decide the NEXT ACTION to solve the task based on the context below.
 
 Context:
@@ -220,8 +102,8 @@ Rules:
 - If the draft is good and no more steps needed → reasoning_final.
 - If you lack details about a command → linux_doc.
 - If you need an option/flag detail → search_in_doc.
-- Otherwise → reasoning_draft to refine the solution.
 - When a command seems good, reasoning_final.
+- If the draft is NOT GOOD reasoning_draft.
 
 STOP CONDITION:
 - If the current draft already solves the task and no more steps are needed, return: {{ "action": "reasoning_final", "reason": "Solution is complete." }}
@@ -308,7 +190,7 @@ from langgraph.graph import StateGraph, END
 graph = StateGraph(AgentState)
 
 # ✅ Ajout des nœuds
-graph.add_node("analyze", analyze_problem_node)
+graph.add_node("analyze", analyse_problem_node)
 graph.add_node("reasoning_draft", reasoning_draft_node)
 graph.add_node("planner", planner_node)
 graph.add_node("linux_doc", linux_doc_node)
