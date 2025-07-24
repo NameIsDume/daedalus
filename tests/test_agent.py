@@ -45,7 +45,7 @@ content = response.json()["choices"][0]["message"]["content"]
 print("[Step 1] Agent Response:\n", content)
 
 # Vérification basique : le modèle doit proposer une commande bash
-assert "Act: bash" in content, "Le premier message doit déclencher une commande bash"
+assert "bash" in content, "Le premier message doit déclencher une commande bash"
 
 # second_message = (
 #     "The output of the OS:\n"

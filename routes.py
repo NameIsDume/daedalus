@@ -42,12 +42,14 @@ def create_router(app_graph):
         # ----------------------
         initial_state = {
             "messages": [HumanMessage(content=user_message)],
-            "tool_history": context["tool_history"],
-            "draft_solution": "",
-            "cycles": 0,
-            "analysis_summary": context["analysis_summary"],
-            "expected_format": context["expected_format"],
-            "last_output": context["last_output"]
+            "expected_format": context.get("expected_format", ""),
+            "analysis_summary": context.get("analysis_summary", ""),
+            "tool_history": context.get("tool_history", []),
+            "draft_solution": context.get("draft_solution", ""),
+            "current_problem": context.get("current_problem", ""),
+            "last_action": context.get("last_action", ""),
+            "tool_context": context.get("tool_context", ""),
+            "cycles": context.get("cycles", 0)
         }
 
         # ✅ Exécution du graphe
@@ -63,7 +65,11 @@ def create_router(app_graph):
             "expected_format": result.get("expected_format", context["expected_format"]),
             "analysis_summary": result.get("analysis_summary", context["analysis_summary"]),
             "tool_history": result.get("tool_history", context["tool_history"]),
-            "last_output": user_message  # Dernière sortie reçue du "système"
+            "draft_solution": result.get("draft_solution", context.get("draft_solution", None)),
+            "current_problem": result.get("current_problem", context.get("current_problem", None)),
+            "last_action": result.get("last_action", context.get("last_action", None)),
+            "tool_context": result.get("tool_context", context.get("tool_context", None)),
+            "cycles": result.get("cycles", context.get("cycles", 0))
         }
 
         # ✅ Retour au client

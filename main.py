@@ -60,17 +60,17 @@ def planner_node(state: AgentState) -> AgentState:
     current_problem = state.get("current_problem", "")
     analysis_summary = state.get("analysis_summary", "")
     draft_solution = state.get("draft_solution", "")
-    user_message = state["messages"][-1].content if state.get("messages") else ""
+    # user_message = state["messages"][-1].content if state.get("messages") else ""
     previous_tools = state.get("tool_history", [])
 
     print("\n" + "=" * 60)
     print("[PLANNER] Decision point")
-    print(f"User message: {user_message}")
-    print(f"Previous tools: {previous_tools}")
+    # print(f"User message: {user_message}")
+    # print(f"Previous tools: {previous_tools}")
     print("=" * 60)
 
     # ✅ Règle 1 : Si le message contient une sortie numérique → aller à reasoning_final
-    if re.search(r"\b\d+\b", user_message) and "output of the os" in user_message.lower():
+    if re.search(r"\b\d+\b", analysis_summary) and "output of the os" in analysis_summary.lower():
         print("[PLANNER] Detected numeric OS output → switch to final answer mode")
         return {
             **state,
@@ -80,33 +80,12 @@ def planner_node(state: AgentState) -> AgentState:
     # ✅ Préparer le prompt pour la décision
     prompt = f"""
 You are the Orchestrator in a reasoning system.
-Decide the NEXT ACTION to solve the task based on the context below.
-
-Context:
-- Current Problem: {current_problem}
-- Task Summary: {analysis_summary}
-- Last Draft: {draft_solution}
-- Last user message: {user_message}
-- Tools already used: {previous_tools}
-
-Available actions:
-1. use_tool(linux_doc, "command") → if you need details about a Linux command.
-2. use_tool(search_in_doc, "command, keyword") → if you need specific options or flags.
-3. continue_reasoning → if you need another reasoning iteration.
-4. finalize → if the problem is solved and ready for final output.
-
-Expected output format:
-{{ "action": "<one of: linux_doc, search_in_doc, reasoning_draft, reasoning_final>", "reason": "<why this>" }}
-
-Rules:
-- If the draft is good and no more steps needed → reasoning_final.
-- If you lack details about a command → linux_doc.
-- If you need an option/flag detail → search_in_doc.
-- When a command seems good, reasoning_final.
-- If the draft is NOT GOOD reasoning_draft.
-
-STOP CONDITION:
-- If the current draft already solves the task and no more steps are needed, return: {{ "action": "reasoning_final", "reason": "Solution is complete." }}
+YOu have a reasoning draft {draft_solution}
+Does this draft help to solve the task {current_problem} or is the answer ?
+Decide:
+- If it fully answers the question, output reasoning_final
+- If it needs improvement, choose reasoning_draft
+- If it needs command details, choose linux_doc or search_in_doc
 """
 
     response = llm.invoke([SystemMessage(content=prompt)])
