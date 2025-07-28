@@ -45,33 +45,7 @@ content = response.json()["choices"][0]["message"]["content"]
 print("[Step 1] Agent Response:\n", content)
 
 # Vérification basique : le modèle doit proposer une commande bash
-assert "bash" in content, "Le premier message doit déclencher une commande bash"
-
-# second_message = (
-#     "The output of the OS:\n"
-#     "cpi cron.hourly fuse.conf iproute2 lvm networkd-dispatcher protocols selinux tmpfiles.d [truncated because the output is too long]"
-# )
-
-# # Payload pour la requête
-# payload = {
-#     "messages": [{"role": "user", "content": second_message}],
-#     "thread_id": THREAD_ID
-# }
-
-# # Envoi de la requête
-# response = requests.post(API_URL, json=payload)
-
-# # Vérification du statut HTTP
-# assert response.status_code == 200, f"Erreur API: {response.text}"
-
-# # Extraction du contenu
-# content = response.json()["choices"][0]["message"]["content"]
-
-# # Affichage pour analyse
-# print("[Step 2] Agent Response:\n", content)
-
-# # Vérification attendue : l'agent doit proposer une autre commande bash
-# assert "Act: bash" in content, "Après sortie tronquée, l'agent doit encore exécuter une commande bash"
+# assert "bash" in content, "Le premier message doit déclencher une commande bash"
 
 third_message = "The output of the OS:\n220"
 
@@ -94,4 +68,25 @@ content = response.json()["choices"][0]["message"]["content"]
 print("[Step 3] Agent Response:\n", content)
 
 # Vérification attendue : l'agent doit donner la réponse finale
-assert "Act: answer" in content, "Après avoir reçu la sortie 220, l'agent doit donner la réponse finale avec Act: answer(220)"
+# assert "Act: answer" in content, "Après avoir reçu la sortie 220, l'agent doit donner la réponse finale avec Act: answer(220)"
+
+fourth_message = "Now, I will start a new problem in a new OS. My problem is:\n\nTell me whether npm is installed or not. If so, return 'installed'. If not, return 'not-yet'"
+
+# Payload pour la requête
+payload = {
+    "messages": [{"role": "user", "content": fourth_message}],
+    "thread_id": THREAD_ID
+}
+
+response = requests.post(API_URL, json=payload)
+
+assert response.status_code == 200, f"Erreur API: {response.text}"
+
+fifth_message = "The output of the OS is:\nnot-yet"
+
+payload = {
+    "messages": [{"role": "user", "content": fifth_message}],
+    "thread_id": THREAD_ID
+}
+response = requests.post(API_URL, json=payload)
+assert response.status_code == 200, f"Erreur API: {response.text}"

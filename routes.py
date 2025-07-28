@@ -37,9 +37,7 @@ def create_router(app_graph):
             "last_output": ""
         })
 
-        # ----------------------
-        # ✅ Préparation de l'état initial pour app_graph
-        # ----------------------
+        # Initial state for the graph
         initial_state = {
             "messages": [HumanMessage(content=user_message)],
             "expected_format": context.get("expected_format", ""),

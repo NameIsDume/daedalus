@@ -2,6 +2,7 @@ from termcolor import colored
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
 from typing import TypedDict, List
 from model import model_llm
+import re
 
 class AgentState(TypedDict):
     messages: List[BaseMessage]
@@ -36,15 +37,15 @@ Rules:
 """
     response = llm.invoke([SystemMessage(content=prompt)])
     analysis_summary = response.content.strip()
-    
+
     print(colored(f"[DEBUG] Initial Problem Analysis: {analysis_summary}", "red"))
     return {
         **state,
         "analysis_summary": analysis_summary,
         "current_problem": analysis_summary,
-        "messages": state["messages"] + [HumanMessage(content=f"[Analysis Summary]\n{analysis_summary}")]
+        "messages": state["messages"] + [HumanMessage(content=user_message)],
     }
-    
+
 def analyse_node_previous_summary(state: AgentState) -> AgentState:
     """
     We already have a previous summary, so we act differently:
@@ -71,12 +72,32 @@ Return only the interpretation, no extra text.
     response = llm.invoke([SystemMessage(content=prompt)])
     analysis_summary = response.content.strip()
     print(colored(f"[DEBUG] Contextual Interpretation: {analysis_summary}", "cyan"))
-    
+
     return {
         **state,
         "analysis_summary": analysis_summary,
-        "messages": state["messages"] + [HumanMessage(content=f"[Analysis Summary]\n{analysis_summary}")]
+        "messages": state["messages"] + [HumanMessage(content=user_message)],
     }
+
+def start_new_task_if_needed(state: AgentState) -> AgentState:
+    """
+    If the last message indicates a new task, reset the analysis.
+    """
+    messages = state.get("messages", [])
+    if not messages:
+        return state
+
+    match = re.search(r"new problem in a new OS", messages[-1].content)
+    if match:
+        print(colored("[DEBUG] Starting a new task, resetting analysis.", "yellow"))
+        return {
+            **state,
+            "analysis_summary": "",
+            "current_problem": "",
+            "last_action": "",
+            "draft_solution": ""
+        }
+    return state
 
 def analyse_problem_node(state: AgentState) -> AgentState:
     """
@@ -84,6 +105,7 @@ def analyse_problem_node(state: AgentState) -> AgentState:
     If there is a previous summary, we analyze the last user message in context of that summary
     If there is "start" a new problem" in the last message, we reset the analysis.
     """
+    state = start_new_task_if_needed(state)
     previous_summary = state.get("analysis_summary", "")
 
     if not previous_summary:

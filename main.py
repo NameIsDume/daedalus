@@ -76,16 +76,23 @@ def planner_node(state: AgentState) -> AgentState:
             **state,
             "plan": {"action": "reasoning_final", "input": "Finalize the answer using expected format"}
         }
+    elif re.search(r"Act:\s*answer\([^)]+\)", draft_solution):
+        print("[PLANNER] Detected final answer format → switch to reasoning_final")
+        return {
+            **state,
+            "plan": {"action": "reasoning_final", "input": "answer(...) detected"}
+        }
 
     # ✅ Préparer le prompt pour la décision
     prompt = f"""
 You are the Orchestrator in a reasoning system.
-YOu have a reasoning draft {draft_solution}
+You have a reasoning draft {draft_solution}
 Does this draft help to solve the task {current_problem} or is the answer ?
 Decide:
 - If it fully answers the question, output reasoning_final
-- If it needs improvement, choose reasoning_draft
-- If it needs command details, choose linux_doc or search_in_doc
+- If it needs improvement, output reasoning_draft
+- If it needs command details, ouput linux_doc or search_in_doc
+DO NOT OUTPUT ANYTHING ELSE.
 """
 
     response = llm.invoke([SystemMessage(content=prompt)])
@@ -119,17 +126,34 @@ def reasoning_final_node(state: AgentState) -> AgentState:
     """
     analysis_summary = state.get("analysis_summary", "No summary.")
     draft_solution = state.get("draft_solution", "")
-    probable_answer = state.get("probable_answer", None)
     expected_format = EXPECTED_FORMATS
-    
+
     tool_context = "\n".join(
         [m.content for m in state["messages"] if "[linux_doc RESULT]" in m.content or "[search_in_doc RESULT]" in m.content]
     )
 
     print(colored("[DEBUG] Generating FINAL output...", "magenta"))
     print(colored(f"Analysis Summary: {analysis_summary}", "magenta"))
-
+    print(colored(f"Draft Solution: {draft_solution}", "magenta"))
     # ✅ Préparer le prompt strict
+#     prompt = f"""
+# You are finalizing the solution for the task.
+
+# Context:
+# - Task Summary: {analysis_summary}
+# - Previous draft: {draft_solution}
+# - Tool context: {tool_context if tool_context else "None"}
+# - Possible format: {expected_format}
+
+# Rules:
+# 1. YOU MUST OUTPUT EXACTLY ONE ACTION.
+# 2. Choose only ONE of the above formats. If you use more than one, the answer is INVALID.
+# 3. Always start with "Think:" then one "Act:" line according to the chosen format.
+# 4. If the task is complete but no numeric answer, use finish.
+# 5. Do NOT include multiple Act sections. Do NOT add text outside the format.
+
+# Output ONLY the reasoning and ONE final action.
+# """
     prompt = f"""
 You are finalizing the solution for the task.
 
@@ -137,15 +161,16 @@ Context:
 - Task Summary: {analysis_summary}
 - Previous draft: {draft_solution}
 - Tool context: {tool_context if tool_context else "None"}
-- Possible format: {expected_format}
+- Expected format: {expected_format}
 
 Rules:
 1. YOU MUST OUTPUT EXACTLY ONE ACTION.
-2. Choose only ONE of the above formats. If you use more than one, the answer is INVALID.
-3. Always start with "Think:" then one "Act:" line according to the chosen format.
-4. If a numeric result or clear answer is available (e.g., 190), use answer(...).
-5. If the task is complete but no numeric answer, use finish.
-6. Do NOT include multiple Act sections. Do NOT add text outside the format.
+2. Choose only ONE of the allowed formats: answer(...), finish, or bash.
+3. Always start with "Think:" then one "Act:" line.
+4. ONLY use `answer(...)` if you are explicitly provided with a result (e.g., the OS output).
+5. NEVER guess or invent the result of a bash command.
+6. If the task is complete but no numeric or text output is available, use finish.
+7. Do NOT include multiple Act sections. Do NOT add text outside the format.
 
 Output ONLY the reasoning and ONE final action.
 """
@@ -158,7 +183,6 @@ Output ONLY the reasoning and ONE final action.
 
     return {
         **state,
-        "messages": state["messages"] + [HumanMessage(content=final_output)],
         "final_output": final_output,
         "last_action": final_output  # Mémoriser la dernière action pour le prochain cycle
     }
