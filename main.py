@@ -134,7 +134,7 @@ def reasoning_final_node(state: AgentState):
     # formatted_msg = AIMessage(content=f"Think: {structured.thought}\nAct: {structured.action}\n{structured.code}")
     print(colored(f"[FINAL REASONING]\n{structured}\n{'-'*50}", "magenta"))
     print("FINAL STRUCTURED OUTPUT")
-    final_str = f"Think: {structured.thought}\nAct: {structured.action}, magenta"
+    final_str = f"Think: {structured.thought}\nAct: {structured.action}"
     print(final_str)
 
     return {
