@@ -3,9 +3,6 @@ from pydantic import BaseModel
 from typing import List, Dict
 from langchain_core.messages import HumanMessage
 
-# ----------------------
-# ✅ Cache en mémoire
-# ----------------------
 session_cache: Dict[str, Dict] = {}
 
 class Message(BaseModel):
@@ -27,9 +24,6 @@ def create_router(app_graph):
         # print(f"Received chat input: {user_message} (thread_id: {thread_id})")
         # print("#############################################")
 
-        # ----------------------
-        # ✅ Récupération du contexte existant
-        # ----------------------
         context = session_cache.get(thread_id, {
             "expected_format": "",
             "analysis_summary": "",
@@ -50,15 +44,13 @@ def create_router(app_graph):
             "cycles": context.get("cycles", 0)
         }
 
-        # ✅ Exécution du graphe
+        # Graph execution
         result = app_graph.invoke(
             initial_state,
             config={"configurable": {"thread_id": thread_id}}
         )
 
-        # ----------------------
-        # ✅ Mise à jour du cache
-        # ----------------------
+        # Update cache
         session_cache[thread_id] = {
             "expected_format": result.get("expected_format", context["expected_format"]),
             "analysis_summary": result.get("analysis_summary", context["analysis_summary"]),
@@ -70,10 +62,9 @@ def create_router(app_graph):
             "cycles": result.get("cycles", context.get("cycles", 0))
         }
 
-        # ✅ Retour au client
         return {
             "choices": [
-                {"message": {"role": "assistant", "content": result["messages"][-1].content}}
+                {"message": {"role": "assistant", "content": result["last_action"]}}
             ]
         }
 

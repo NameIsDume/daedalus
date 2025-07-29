@@ -60,17 +60,15 @@ def linux_doc_node(state: AgentState) -> AgentState:
     plan = state.get("plan", {})
     plan_input = plan.get("input", "")
 
-    # Essayer d'extraire le "command" depuis la chaîne
+
     match = re.search(r'"command"\s*:\s*"([^"]+)"', plan_input)
-    command = match.group(1) if match else "ls"  # fallback par défaut
+    command = match.group(1) if match else "ls"
 
     print(colored(f"[TOOL CALL] linux_doc with command='{command}'", "cyan"))
 
-    # ✅ Exécution du tool
     result = linux_doc(command)
     print(colored(f"[TOOL RESULT] linux_doc returned {len(result)} chars", "cyan"))
 
-    # ✅ Mise à jour de l'état
     new_state = {
         **state,
         "messages": state["messages"] + [HumanMessage(content=f"[linux_doc RESULT]\n{result}")],
@@ -85,7 +83,6 @@ def search_in_doc_node(state: AgentState) -> AgentState:
     plan = state.get("plan", {})
     plan_input = plan.get("input", "")
 
-    # Extraire commande et mot-clé via regex
     cmd_match = re.search(r'"command"\s*:\s*"([^"]+)"', plan_input)
     kw_match = re.search(r'"keyword"\s*:\s*"([^"]+)"', plan_input)
 
@@ -94,10 +91,9 @@ def search_in_doc_node(state: AgentState) -> AgentState:
 
     print(colored(f"[TOOL CALL] search_in_doc {cmd}:{kw}", "cyan"))
 
-    # ✅ Exécution du tool
+
     result = search_in_doc(cmd, kw)
 
-    # ✅ Mise à jour de l'état
     new_state = {
         **state,
         "messages": state["messages"] + [HumanMessage(content=f"[search_in_doc RESULT]\n{result}")],

@@ -4,6 +4,8 @@ from typing import TypedDict, List
 from model import model_llm
 import re
 
+llm = model_llm
+
 class AgentState(TypedDict):
     messages: List[BaseMessage]
     expected_format: str
@@ -14,7 +16,6 @@ class AgentState(TypedDict):
     tool_context: str
     cycles: int
 
-llm = model_llm
 
 def analyse_node_first_interaction(state: AgentState) -> AgentState:
     """
@@ -24,7 +25,6 @@ def analyse_node_first_interaction(state: AgentState) -> AgentState:
     # print(colored(f"[DEBUG] First interaction analysis:\n{user_message}\n{'-'*50}", "cyan"))
 
     if "problem is" in user_message.lower():
-        # Si le message contient "problem is", on en déduit le but initial
         user_message = user_message.split("problem is", 1)[-1].strip()
 
     prompt = f"""
@@ -35,7 +35,7 @@ Rules:
 - Do NOT propose a solution.
 - Max 30 words.
 """
-    response = llm.invoke([SystemMessage(content=prompt)])
+    response = model_llm.invoke([SystemMessage(content=prompt)])
     analysis_summary = response.content.strip()
 
     print(colored(f"[DEBUG] Initial Problem Analysis: {analysis_summary}", "red"))
@@ -69,7 +69,7 @@ Examples:
 - If unrelated → Output irrelevant to goal.
 Return only the interpretation, no extra text.
     """
-    response = llm.invoke([SystemMessage(content=prompt)])
+    response = model_llm.invoke([SystemMessage(content=prompt)])
     analysis_summary = response.content.strip()
     print(colored(f"[DEBUG] Contextual Interpretation: {analysis_summary}", "cyan"))
 

@@ -35,7 +35,7 @@ def reasoning_draft_first_interaction(state: AgentState) -> AgentState:
 
     Current Problem: {current_problem}
     """
-    response = llm.invoke([SystemMessage(content=prompt)])
+    response = model_llm.invoke([SystemMessage(content=prompt)])
     draft_solution = response.content.strip()
 
     print(colored(f"[DRAFT REASONING]\n{draft_solution}\n{'-'*50}", "red"))
@@ -82,7 +82,7 @@ def reasoning_draft_multiple_steps(state: AgentState) -> AgentState:
     Act: answer(<value>)
     """
 
-    response = llm.invoke([SystemMessage(content=prompt)])
+    response = model_llm.invoke([SystemMessage(content=prompt)])
     draft_solution = response.content.strip()
 
     print(colored(f"[DRAFT REASONING]\n{draft_solution}\n{'-'*50}", "red"))
