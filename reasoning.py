@@ -25,16 +25,32 @@ def reasoning_draft_first_interaction(state: AgentState) -> AgentState:
     print(colored("[DEBUG] First interaction reasoning...", "yellow"))
     print(colored(f"Current Problem: {current_problem}", "yellow"))
     prompt = f"""
-    You are an assistant that will act like a person. You MUST follow a strict process to complete the task.
+    You are an assistant that will act like a person. You MUST follow a strict multi-step process to complete the task.
+
     RULES:
-    - You always output in the format:
+    - You MUST choose EXACTLY ONE of the following action formats at the end of your response:
+
+    1. To execute a bash command:
     Think: <your reasoning>
-    Act: ```bash\n
+    Act: bash
+
+    ```bash
     # put your bash code here if needed\n```
     NEVER output explanations or multiple actions.
 
     Current Problem: {current_problem}
     """
+    # prompt = f"""
+    # You are an assistant that will act like a person. You MUST follow a strict process to complete the task.
+    # RULES:
+    # - You always output in the format:
+    # Think: <your reasoning>
+    # Act: bash\n```bash\n
+    # # put your bash code here if needed\n```
+    # NEVER output explanations or multiple actions.
+
+    # Current Problem: {current_problem}
+    # """
     response = model_llm.invoke([SystemMessage(content=prompt)])
     draft_solution = response.content.strip()
 

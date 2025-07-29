@@ -1,17 +1,17 @@
 from fastapi import FastAPI
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel, Field
-from typing import Literal, Dict
-import httpx
-from typing import TypedDict, List
+from typing import Literal, Dict, Optional, TypedDict, List
 from langchain_core.messages import BaseMessage
 from termcolor import colored
-from typing import Optional
+
 import uvicorn
+import httpx
+
 from model import model_llm
 from tools import linux_doc_node, search_in_doc_node
 from reasoning import reasoning_draft_node
@@ -20,9 +20,6 @@ from analyse import analyse_problem_node
 MAX_CYCLES = 2
 
 llm = model_llm
-
-from termcolor import colored
-
 
 class FinalResponse(BaseModel):
     """Structured response for final reasoning output"""
@@ -43,7 +40,6 @@ class AgentState(TypedDict):
 model_with_structured_output = llm.with_structured_output(FinalResponse)
 
 import re
-from langchain_core.messages import SystemMessage
 
 def planner_node(state: AgentState) -> AgentState:
     """
@@ -73,12 +69,12 @@ def planner_node(state: AgentState) -> AgentState:
             **state,
             "plan": {"action": "reasoning_final", "input": "answer(...) detected"}
         }
-    elif re.search(r"Act:\s*```bash\b", draft_solution):
+    elif re.search(r"^Act:\s*bash\s*$\n+```bash", draft_solution, re.MULTILINE):
         print("[PLANNER] Detected bash command → switch to reasoning_final")
         return {
             **state,
             "plan": {"action": "reasoning_final", "input": "bash command detected"}
-    }
+        }
 
     prompt = f"""
 You are the Orchestrator in a reasoning system.
@@ -112,8 +108,6 @@ DO NOT OUTPUT ANYTHING ELSE.
         "plan": {"action": action, "input": decision_raw}
     }
 
-from langchain_core.messages import SystemMessage
-
 def reasoning_final_node(state: AgentState):
     current_problem = state.get("current_problem", "")
     output_os = state.get("output_of_os", "")
@@ -131,10 +125,22 @@ def reasoning_final_node(state: AgentState):
         HumanMessage(content=f"Task: {current_problem}\nPrevious Output: {output_os}\nReasoning: {reasoning}")
     ])
 
-    # formatted_msg = AIMessage(content=f"Think: {structured.thought}\nAct: {structured.action}\n{structured.code}")
+    formatted_msg = f"Think: {structured.thought}\nAct: {structured.action}\n{structured.code}"
+    print(f"FORMATED MESSAGE: {formatted_msg}")
     print(colored(f"[FINAL REASONING]\n{structured}\n{'-'*50}", "magenta"))
     print("FINAL STRUCTURED OUTPUT")
-    final_str = f"Think: {structured.thought}\nAct: {structured.action}"
+    # final_str = f"Think: {structured.thought}\nAct: {structured.action}"
+    # print(final_str)
+
+    if structured.action.strip() == "bash":
+        final_str = f"Think: {structured.thought}\nAct: bash\n\n```bash\n{structured.code.strip()}\n```"
+    elif structured.action.startswith("answer("):
+        final_str = f"Think: {structured.thought}\nAct: {structured.action}"
+    elif structured.action.strip() == "finish":
+        final_str = f"Think: {structured.thought}\nAct: finish"
+    else:
+        raise ValueError(f"Invalid action returned: {structured.action}")
+
     print(final_str)
 
     return {
