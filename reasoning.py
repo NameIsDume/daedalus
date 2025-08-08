@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from termcolor import colored
 from typing import TypedDict, List
 import re
+from prompt_and_format import remove_multiline_think_blocks
 
 class AgentState(TypedDict):
     messages: List[BaseMessage]
@@ -40,19 +41,8 @@ def reasoning_draft_first_interaction(state: AgentState) -> AgentState:
 
     Current Problem: {current_problem}
     """
-    # prompt = f"""
-    # You are an assistant that will act like a person. You MUST follow a strict process to complete the task.
-    # RULES:
-    # - You always output in the format:
-    # Think: <your reasoning>
-    # Act: bash\n```bash\n
-    # # put your bash code here if needed\n```
-    # NEVER output explanations or multiple actions.
-
-    # Current Problem: {current_problem}
-    # """
     response = model_llm.invoke([SystemMessage(content=prompt)])
-    draft_solution = response.content.strip()
+    draft_solution = remove_multiline_think_blocks(response.content.strip())
 
     print(colored(f"[DRAFT REASONING]\n{draft_solution}\n{'-'*50}", "red"))
 
@@ -99,7 +89,8 @@ def reasoning_draft_multiple_steps(state: AgentState) -> AgentState:
     """
 
     response = model_llm.invoke([SystemMessage(content=prompt)])
-    draft_solution = response.content.strip()
+    draft_solution = remove_multiline_think_blocks(response.content.strip())
+    # draft_solution = response.content.strip()
 
     print(colored(f"[DRAFT REASONING]\n{draft_solution}\n{'-'*50}", "red"))
     return {

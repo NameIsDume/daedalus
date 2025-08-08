@@ -16,7 +16,6 @@ system_prompt = (
 )
 
 def remove_multiline_think_blocks(text: str) -> str:
-    # Supprime tout ce qui est entre <think>...</think>, même sur plusieurs lignes
     # print("############")
     cleaned = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL | re.IGNORECASE)
     return cleaned.strip()

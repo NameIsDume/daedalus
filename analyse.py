@@ -1,6 +1,7 @@
 from termcolor import colored
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
 from typing import TypedDict, List
+from prompt_and_format import remove_multiline_think_blocks
 from model import model_llm
 import re
 
@@ -18,9 +19,6 @@ class AgentState(TypedDict):
 
 
 def analyse_node_first_interaction(state: AgentState) -> AgentState:
-    """
-    Analyse le premier message utilisateur pour définir le but initial.
-    """
     user_message = state["messages"][-1].content if state.get("messages") else ""
     # print(colored(f"[DEBUG] First interaction analysis:\n{user_message}\n{'-'*50}", "cyan"))
 
@@ -36,7 +34,8 @@ Rules:
 - Max 30 words.
 """
     response = model_llm.invoke([SystemMessage(content=prompt)])
-    analysis_summary = response.content.strip()
+    analysis_summary = remove_multiline_think_blocks(response.content.strip())
+    # analysis_summary = response.content.strip()
 
     print(colored(f"[DEBUG] Initial Problem Analysis: {analysis_summary}", "red"))
     return {
@@ -47,9 +46,6 @@ Rules:
     }
 
 def analyse_node_previous_summary(state: AgentState) -> AgentState:
-    """
-    We already have a previous summary, so we act differently:
-    """
     user_message = state["messages"][-1].content if state.get("messages") else ""
     current_problem = state.get("current_problem", "")
     previous_summary = state.get("analysis_summary", "")
@@ -70,7 +66,8 @@ Examples:
 Return only the interpretation, no extra text.
     """
     response = model_llm.invoke([SystemMessage(content=prompt)])
-    analysis_summary = response.content.strip()
+    analysis_summary= remove_multiline_think_blocks(response.content.strip())
+    # analysis_summary = response
     print(colored(f"[DEBUG] Contextual Interpretation: {analysis_summary}", "cyan"))
 
     return {
@@ -80,9 +77,6 @@ Return only the interpretation, no extra text.
     }
 
 def start_new_task_if_needed(state: AgentState) -> AgentState:
-    """
-    If the last message indicates a new task, reset the analysis.
-    """
     messages = state.get("messages", [])
     if not messages:
         return state

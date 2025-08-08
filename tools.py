@@ -19,9 +19,6 @@ class AgentState(TypedDict):
     tool_context: str
     cycles: int
 
-# ==========================================
-# 2. Tools
-# ==========================================
 @tool
 def linux_doc(command: str) -> str:
     """Fetch Linux manual page for a command."""

@@ -31,7 +31,6 @@ def create_router(app_graph):
             "last_output": ""
         })
 
-        # Initial state for the graph
         initial_state = {
             "messages": [HumanMessage(content=user_message)],
             "expected_format": context.get("expected_format", ""),
@@ -44,13 +43,11 @@ def create_router(app_graph):
             "cycles": context.get("cycles", 0)
         }
 
-        # Graph execution
         result = app_graph.invoke(
             initial_state,
             config={"configurable": {"thread_id": thread_id}}
         )
 
-        # Update cache
         session_cache[thread_id] = {
             "expected_format": result.get("expected_format", context["expected_format"]),
             "analysis_summary": result.get("analysis_summary", context["analysis_summary"]),

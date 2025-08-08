@@ -5,12 +5,12 @@ from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel, Field
-from typing import Literal, Dict, Optional, TypedDict, List
+from typing import TypedDict, List
 from langchain_core.messages import BaseMessage
+from prompt_and_format import remove_multiline_think_blocks
 from termcolor import colored
 
 import uvicorn
-import httpx
 
 from model import model_llm
 from tools import linux_doc_node, search_in_doc_node
@@ -88,7 +88,7 @@ DO NOT OUTPUT ANYTHING ELSE.
 """
 
     response = llm.invoke([SystemMessage(content=prompt)])
-    decision_raw = response.content.strip()
+    decision_raw = remove_multiline_think_blocks(response.content.strip())
 
     print("[PLANNER RAW DECISION]")
     print(decision_raw)
@@ -119,9 +119,16 @@ def reasoning_final_node(state: AgentState):
     print(f"Previous Output: {output_os}")
     print(f"Reasoning: {reasoning}")
 
-    # Here we generated a structured output that matche the benchmark expectation
     structured = model_with_structured_output.invoke([
-        SystemMessage(content="You are finalizing the task. Output must follow structured reasoning format."),
+        SystemMessage(content="""You are finalizing a reasoning task. You must respond using a strict JSON format. Your response must contain exactly the following fields:
+        - `thought`: your reasoning.
+        - `action`: must be EXACTLY one of the following values:
+        - "bash" if a bash command must be executed
+        - "finish" if the task is complete
+        - "answer(...)" with the answer in parentheses
+
+        - `code`: only required if action is "bash", in which case it should contain the bash command (single-line string).
+        Do not include any other text or explanation. Only return a JSON object matching this format."""),
         HumanMessage(content=f"Task: {current_problem}\nPrevious Output: {output_os}\nReasoning: {reasoning}")
     ])
 
@@ -129,8 +136,6 @@ def reasoning_final_node(state: AgentState):
     print(f"FORMATED MESSAGE: {formatted_msg}")
     print(colored(f"[FINAL REASONING]\n{structured}\n{'-'*50}", "magenta"))
     print("FINAL STRUCTURED OUTPUT")
-    # final_str = f"Think: {structured.thought}\nAct: {structured.action}"
-    # print(final_str)
 
     if structured.action.strip() == "bash":
         final_str = f"Think: {structured.thought}\nAct: bash\n\n```bash\n{structured.code.strip()}\n```"
@@ -139,7 +144,8 @@ def reasoning_final_node(state: AgentState):
     elif structured.action.strip() == "finish":
         final_str = f"Think: {structured.thought}\nAct: finish"
     else:
-        raise ValueError(f"Invalid action returned: {structured.action}")
+        final_str = f"Think: Error during final reasoning \nAct: finish"
+        # raise ValueError(f"Invalid action returned: {structured.action}")
 
     print(final_str)
 
@@ -180,15 +186,24 @@ graph.set_entry_point("analyze")
 
 
 from routes import create_router
+from cli import run_cli
 checkpointer = MemorySaver()
 app_graph = graph.compile(checkpointer=checkpointer)
 
-# Crée le router avec le graph
 router = create_router(app_graph)
 
 app = FastAPI(title="Linux Agent API")
 app.include_router(router)
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=11435, reload=True)
+    import sys, argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cli", action="store_true")
+    parser.add_argument("--thread", type=str, default=None, help="ID de session pour continuer une conversation")
+    args = parser.parse_args()
+
+    if args.cli:
+        run_cli(app_graph, thread_id=args.thread)
+    else:
+        import uvicorn
+        uvicorn.run("main:app", host="127.0.0.1", port=11435, reload=True)
